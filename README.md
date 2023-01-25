@@ -1,112 +1,284 @@
-# Scan your code with SonarCloud
+# pd-tech-fest-2019
 
-Using this GitHub Action, scan your code with [SonarCloud](https://sonarcloud.io/) to detects bugs, vulnerabilities and code smells in more than 20 programming languages!
-In case you want to analyze C and C++ code: rely on our [SonarCloud Scan for C and C++](https://github.com/marketplace/actions/sonarcloud-scan-for-c-and-c) and look at [our sample C and C++ project](https://github.com/sonarsource-cfamily-examples?q=gh-actions-sc&type=all&language=&sort=)
+Demo code for [Programmers Developers Tech Fest 2019](https://www.eventbrite.com/e/pd-techfest-tickets-62965805419)
 
-<img src="./images/SonarCloud-72px.png">
+[![Scaling containers with KEDA](/images/pd-tech-fest.png)](https://www.eventbrite.com/e/pd-techfest-tickets-62965805419)
 
-SonarCloud is the leading product for Continuous Code Quality & Code Security online, totally free for open-source projects. It supports all major programming languages, including Java, JavaScript, TypeScript, C#, [C and C++](https://github.com/marketplace/actions/sonarcloud-scan-for-c-and-c) and many more. If your code is closed source, SonarCloud also offers a paid plan to run private analyses.
+There are multiple options for scaling with Kubernetes and containers in general. This demo uses `Kubernetes-based Event Driven Autoscaling (KEDA)`. RabbitMQ is used as an event source.
 
-## Requirements
+## Prerequisites
 
-* Have an account on SonarCloud. [Sign up for free now](https://sonarcloud.io/sessions/init/github) if it's not already the case!
-* The repository to analyze is set up on SonarCloud. [Set it up](https://sonarcloud.io/projects/create) in just one click.
+- Azure Susbscription to create AKS cluster
+- kubectl logged into kubernetes cluster
+- Powershell
+- Postman
+- Helm
+- DockerHub account (optional)
 
-## Usage
+If you wish to use Kubernetes cluster apart from AKS, you can skip the `Step 2.1` of provisioning the cluster and [install KEDA](https://github.com/kedacore/keda#setup) on your own kubernetes cluster.
 
-Project metadata, including the location to the sources to be analyzed, must be declared in the file `sonar-project.properties` in the base directory:
+Similarly, if you do not wish to execute the Powershell scripts, you can execute the commands which are part of those scripts manually.
 
-```properties
-sonar.organization=<replace with your SonarCloud organization key>
-sonar.projectKey=<replace with the key generated when setting up the project on SonarCloud>
+## 1 - Code organization
 
-# relative paths to source directories. More details and properties are described
-# in https://sonarcloud.io/documentation/project-administration/narrowing-the-focus/
-sonar.sources=.
+- [src](src)
+
+Contains the source code for a model classes for a hypothetical Tech Talks management application. `TechTalksMQProducer` contains the code for generating the events / messages which are published to a RabbitMQ queue. `TechTalksMQConsumer` contains the consumer code for processing RabbitMQ messages.
+
+Both the Producer and Consumer uses the common data model. In order to build these using Dockerfile, we define the [TechTalksMQProducer](/src/Dockerfile-TechTalksMQProducer) and [TechTalksMQConsumer](/src/Dockerfile-TechTalksMQConsumer). These are built [docker-compose-build](/src/docker-compose-build.yml) file.
+
+The docker images can be built using the following command
+
+```powershell
+
+Measure-Command { docker-compose -f docker-compose-build.yml build | Out-Default }
+
+
 ```
 
-The workflow, usually declared in `.github/workflows/build.yml`, looks like:
+Once the images are built successfully, we can push them to the DockerHub registry using the command
 
-```yaml
-on:
-  # Trigger analysis when pushing in master or pull requests, and when creating
-  # a pull request.
-  push:
-    branches:
-      - master
-  pull_request:
-      types: [opened, synchronize, reopened]
-name: Main Workflow
-jobs:
-  sonarcloud:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-      with:
-        # Disabling shallow clone is recommended for improving relevancy of reporting
-        fetch-depth: 0
-    - name: SonarCloud Scan
-      uses: sonarsource/sonarcloud-github-action@master
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+```powershell
+
+Measure-Command { docker-compose -f docker-compose-build.yml push | Out-Default }
+
 ```
 
-You can change the analysis base directory by using the optional input `projectBaseDir` like this:
+- [Powershell](Powersehll)
 
-```yaml
-uses: sonarsource/sonarcloud-github-action@master
-with:
-  projectBaseDir: my-custom-directory
+Contains the helper Powershell scripts to provision AKS cluster, to proxy into the Kubernetes control plane, to delete the resource group, to deploy the application and also to delete the application.
+
+- [k8s](k8s)
+
+Contains Kubernetes manifest files for deploying the Producer, Consumer and the Autoscalar components to the Kubernetes cluster.
+
+- [helm](helm)
+
+Contains the Helm RBAC enabling yaml file which add the Cluster Role Binding for RBAC enabled Kubernetes cluster. This was required before Helm 3.0 for the Tiller service.With helm 3.0, Tiller is no longer required.
+
+---
+
+## 2 - Demo setup
+
+### 2.1 Initialize AKS cluster with KEDA
+
+Run [initializeAKS](/Powershell/initializeAKS.ps1) powershell script with default values from Powershell directory
+
+```powershell
+
+.\initializeAKS.ps1
+
 ```
 
-In case you need to add additional analysis parameters, you can use the `args` option:
+Note: The default options can be overwritten by passing arguments to the initializeAKS script. In the below example, we are overriding the number of nodes in the AKS cluster to 4 instead of 3 and resource group name as `kedaresgrp`.
 
-```yaml
-- name: Analyze with SonarCloud
-  uses: sonarsource/sonarcloud-github-action@master
-  with:
-    projectBaseDir: my-custom-directory
-    args: >
-      -Dsonar.organization=my-organization
-      -Dsonar.projectKey=my-projectkey
-      -Dsonar.python.coverage.reportPaths=coverage.xml
-      -Dsonar.sources=lib/
-      -Dsonar.test.exclusions=tests/**
-      -Dsonar.tests=tests/
-      -Dsonar.verbose=true
+```powershell
+
+.\initilaizeAKS `
+-workerNodeCount 4 `
+-resourceGroupName "kedaresgrp"
+
 ```
 
-More information about possible analysis parameters is found in the documentation at:
-https://docs.sonarcloud.io/advanced-setup/analysis-parameters
+### 2.2 Deploy KEDA
 
-See also example configurations at:
-https://github.com/sonarsource/sonarcloud-github-action-samples/
+```powershell
 
-### Secrets
+.\deployKEDA.ps1
 
-- `SONAR_TOKEN` – **Required** this is the token used to authenticate access to SonarCloud. You can generate a token on your [Security page in SonarCloud](https://sonarcloud.io/account/security/). You can set the `SONAR_TOKEN` environment variable in the "Secrets" settings page of your repository.
-- *`GITHUB_TOKEN` – Provided by Github (see [Authenticating with the GITHUB_TOKEN](https://help.github.com/en/actions/automating-your-workflow-with-github-actions/authenticating-with-the-github_token)).*
+```
 
-## Example of pull request analysis
+Verify KEDA is installed correctly on the Kubernetes cluster.
 
-<img src="./images/SonarCloud-analysis-in-Checks.png">
+```code
 
-## Do not use this GitHub action if you are in the following situations
+kubectl get all -n keda
 
-* Your code is built with Maven: run 'org.sonarsource.scanner.maven:sonar' during the build
-* Your code is built with Gradle: use the SonarQube plugin for Gradle during the build
-* You want to analyze a .NET solution: Follow our interactive tutorial for Github Actions after importing your project directly in SonarCloud
-* You want to analyze C and C++ code: rely on our [SonarCloud Scan for C and C++](https://github.com/marketplace/actions/sonarcloud-scan-for-c-and-c) and look at [our sample C and C++ project](https://github.com/sonarsource-cfamily-examples?q=gh-actions-sc&type=all&language=&sort=)
+```
 
-## Have question or feedback?
+### 2.3 Deploy RabbitMQ queue
 
-To provide feedback (requesting a feature or reporting a bug) please post on the [SonarSource Community Forum](https://community.sonarsource.com/) with the tag `sonarcloud`.
+```powershell
 
-## License
+.\deployRabbitMQ.ps1
 
-The Dockerfile and associated scripts and documentation in this project are released under the LGPLv3 License.
+```
 
-Container images built with this project include third party materials.
+### 2.4 Deploy RabbitMQ Producer & Consumers
 
-[![Build Status](https://travis-ci.com/SonarSource/sonarcloud-github-action.svg?branch=master)](https://travis-ci.com/SonarSource/sonarcloud-github-action)
+Execute the `deployTechTalks-AKS.ps1` powershell script.
+
+```powershell
+
+.\deployTechTalks-AKS.ps1
+
+```
+
+The `deployTechTalks` powershell script deploys the RabbitMQConsumer and RabbitMQProducer in the correct order. Alternately, all the components can also be deployed directly using the `kubectl` apply command recursively on the k8s directory as shown below.
+
+Run the kubectl apply recursively on k8s directory
+
+```code
+
+kubectl apply -R -f .
+
+```
+
+### 2.5 Deploy Auto scalar for RabbitMQ consumer deployment
+
+Execute the `deployAutoScaler.ps1` powershell script.
+
+```powershell
+
+.\deployAutoScaler.ps1
+
+```
+
+If you do not wish to run the individual PowerShell scripts, you can run one single script which will deploy all the necessary things by running the above scripts in correct order.
+
+```Powershell
+
+.\deployAll.ps1
+
+```
+
+### 2.6 Get list of all the services deployed in the cluster
+
+We will need to know the service name for RabbitMQ to be able to do port forwarding to the RabbitMQ management UI and also the public IP assigned to the TechTalks producer service which will be used to generate the messages onto RabbitmQ queue.
+
+```code
+
+kubectl get svc
+
+```
+
+![List of all Kubernetes services](/images/all-services.png)
+
+As we can see above, RabbitMQ service is available within the Kubernetes cluster and it exposes `4369`, `5672`, `25672` and `15672` ports. We will be using `15672` port to map to a local port.
+
+Also note the public `LoadBalancer` IP for the techtalksapi service. In this case the IP is **`52.139.237.252`**.
+**Note:** This IP will be different when the services are redeployed on a different Kubernetes cluster.
+
+### 2.7 Watch for deployments
+
+The rabbitmq `ScaledObject` will be deployed as part of the deployment. Watch out for the deployments to see the changes in the scaling as the number of messages increases
+
+```code
+
+kubectl get deployment -w
+
+kubectl get deploy -w
+
+```
+
+![List of all Kubernetes services](/images/initial-deploy-state.png)
+
+Initially there is 1 instance of rabbitmq-consumer and 2 replicas of the techtalksapi (producer) deployed in the cluster.
+
+### 2.8 Port forward for RabbitMQ management UI
+
+We will use port forwarding approach to access the RabbitMQ management UI.
+
+```code
+
+kubectl port-forward svc/rabbitmq 15672:15672
+
+```
+
+### 2.9 Browse RabbitMQ Management UI
+
+http://localhost:15672/
+
+Login to the management UI using credentials as `user` and `PASSWORD`. Remember that these were set during the installation of RabbitMQ services using Helm. If you are using any other user, please update the username and password accordingly.
+
+### 2.10 Generate load using `Postman`
+
+I am using [Postman](https://www.getpostman.com/) to submit a POST request to the API which generates 1000 messages onto a RabbitMQ queue named `hello`. You can use any other command line tool like CURL to submit a GET request.
+
+Use the `EXTERNAL-IP -52.139.237.252` with port `8080` to submit a GET request to the API. http://52.139.237.252:8080/api/TechTalks/Generate?numberOfMessages=2000
+
+![postman success](/images/postman-get-request.png)
+
+Note that we are setting the number of messages to be produced by Producer as 2000 in this case. You can change the number to any other integer value.
+
+After building the GET query, hit the blue `Send` button on the top right. If everything goes fine, you should receive a `200 OK` as status code.
+
+![postman success](/images/postman-success.png)
+
+The Producer will produce 2000 messages on the queue named `hello`. The consumer is configured to process `10` messages in a batch. The consumer also simulates a long running process by sleeping for `2 seconds`.
+
+### 2.11 Auto-scaling in action
+
+See the number of containers for consumer grow to adjust the messages and also the drop when messages are processed.
+
+![autoscaling consumers](/images/pods-and-deployments-autoscaled.png)
+
+On the left hand side of the screen you can see the pods auto scaled and on the right we see the deploymnets autoscaled progressively to 2,4,8, 16 and 30.
+
+While the messages are being processed, we can also observe the RabbitMQ management UI.
+
+![autoscaling consumers](/images/RabbitMQ-managementUI.PNG)
+
+Our consumer processes 50 messages in a batch by prefetching them together. This can be verified by looking at the details of the consumers.
+
+![Prefetch messages](/images/rabbitMQ-prefetch.PNG)
+
+Once all the messages are processed, KEDA will scale down the pods and the deployments.
+
+![autoscaled down consumers](/images/pods-and-deployments-scaled-down.png)
+
+List Custom Resource Definition
+
+```code
+
+kubeclt get crd
+
+```
+
+![autoscaled down consumers](/images/KEDA-CRD.PNG)
+
+---
+
+As part of the KEDA installation, ScaledObject and TriggerAuthentications are deployed on the Kubernetes cluster.
+
+## YouTube videos
+
+As part of my YouTube channel, I also did a multi-part series on this project. The videos published on the channel are available below :
+
+- Part 1 - Autoscaling containers with KEDA - Provision AKS cluster
+
+[![Part 1 - Autoscaling containers with KEDA - Provision AKS cluster](/images/part1-AKS-cluster-provision.gif)](https://youtu.be/Bq2CpEcRtPw)
+
+- Part 2 - Autoscaling containers with KEDA - Deploy Application Containers
+
+[![Part 2 - Autoscaling containers with KEDA - Deploy Application Containers](/images/part2-apps-deployment.png)](https://youtu.be/X8x_FdN1Fvo)
+
+- Part 3 - Autoscaling containers with KEDA - KEDA Autoscale in action
+
+[![Part 3 - Autoscaling containers with KEDA - KEDA Autoscale in action](/images/part3-KEDA-install.gif)](https://youtu.be/X8x_FdN1Fvo)
+
+## Slides
+
+Here are the links to slides from the presentation
+
+### Slideshare
+
+[![Scaling containers with KEDA](/images/slideshare.PNG)](https://www.slideshare.net/nileshgule/scaling-containers-with-keda)
+
+### Speakerdeck
+
+[![Scaling containers with KEDA](/images/speakerdeck.PNG)](https://speakerdeck.com/nileshgule/scaling-containers-with-keda)
+
+## Different talks where this repo is used
+
+- [![Azure Singapore - Monitor Kubernetes cluster using Prometheus and Grafana - 19 August 2021](/images/azure-singapore-19-august-2021.PNG)](https://youtu.be/t8uenUoI4Mw)
+
+- [![Microsoft Reactor Bengaluru - Monitor Kubernetes cluster using open source tools Prometheus and Grafana - 14 August 2021](/images/msreactor-bengaluru-14-Aug-2021.jpg)](https://youtu.be/Lv0D3fdwJhU)
+
+- [![Pune User Group - How to manage event driven workloads on Kubernetes using KEDA - 27 February 2021](/images/pune-user-group-27-Feb-2021.PNG)](https://youtu.be/a1pkrCUuKD0)
+
+- [![OSS Days - Serverless Event Driven Containers with KEDA - 30 October 2020](/images/oss-days-30-october-2020.jfif)](https://youtu.be/-bAlWBbRtEw?t=11049)
+
+- [![OSS Days - Serverless Event Driven Containers with KEDA - Edureca - 30 October 2020](/images/oss-days-edureca-30-october-2020.PNG)](https://youtu.be/a_gqfKXK874?t=11141)
+
+
