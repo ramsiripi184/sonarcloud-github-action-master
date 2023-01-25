@@ -17,8 +17,8 @@ name: SonarCloud Scan
 on:
   push:
     branches:
-      - "main"
-      - "feature*"
+      - "*"
+     # - "feature*"
 
 ###############
 # Set the Job #
