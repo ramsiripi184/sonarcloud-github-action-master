@@ -19,7 +19,7 @@ If you wish to use Kubernetes cluster apart from AKS, you can skip the `Step 2.1
 
 Similarly, if you do not wish to execute the Powershell scripts, you can execute the commands which are part of those scripts manually.
 
-## 1 - Code organization -1
+## 1 - Code organization 
 
 - [src](src)
 
