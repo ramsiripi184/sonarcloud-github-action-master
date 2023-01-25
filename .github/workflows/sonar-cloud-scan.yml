@@ -18,7 +18,7 @@ on:
   push:
     branches:
       - "*"
-     # - "feature*"
+      - "feature*"
 
 ###############
 # Set the Job #
